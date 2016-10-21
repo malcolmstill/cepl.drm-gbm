@@ -33,7 +33,7 @@
      red-size green-size blue-size buffer-size
      double-buffer hidden resizable gl-version)
   "Initializes the backend and returns a list containing: (context window)"
-  (let* ((fd (sb-posix:open "/dev/dri/card0" sb-posix:o-rdwr))
+  (let* ((fd (nix:open "/dev/dri/card0" nix:o-rdwr))
 	 (display-config (drm:find-display-configuration fd))
 	 (mode (drm:mode-info display-config))
 	 (connector-id (drm:connector-id display-config))
@@ -84,53 +84,6 @@
       (setf (display-config *drm-gbm*) display-config)
       (list egl-context *drm-gbm*))))
 
-#|
-(defmethod cepl.host:request-context
-    (width height title fullscreen
-     no-frame alpha-size depth-size stencil-size
-     red-size green-size blue-size buffer-size
-     double-buffer hidden resizable gl-version)
-  "Initializes the backend and returns a list containing: (context window)"
-  (let ((win (sdl2:create-window
-              :title title :w width :h height
-              :flags (remove nil `(:shown :opengl
-                                          ,(when fullscreen :fullscreen-desktop)
-                                          ,(when resizable :resizable)
-                                          ,(when no-frame :borderless)
-                                          ,(when hidden :hidden))))))
-    (destructuring-bind (&optional major minor)
-        (when gl-version (cepl.context:split-float-version gl-version))
-      #+windows ; hack to fix CEPL hangup on Windows under SLIME
-      (progn
-        (sdl2:hide-window win)
-        (sdl2:show-window win)
-        (when hidden
-          (sdl2:hide-window win)))
-      #+darwin
-      (progn
-        (setf cl-opengl-bindings::*gl-get-proc-address* #'sdl2::gl-get-proc-address)
-        (sdl2:gl-set-attr :context-major-version (or major 4))
-        (sdl2:gl-set-attr :context-minor-version (or minor 1))
-        (sdl2:gl-set-attr :context-profile-mask sdl2-ffi::+SDL-GL-CONTEXT-PROFILE-CORE+))
-      #-darwin
-      (when gl-version
-        (sdl2:gl-set-attr :context-major-version major)
-        (sdl2:gl-set-attr :context-minor-version minor))
-      (handler-case (sdl2:gl-set-attr :context-profile-mask 1)
-        (error ()))
-      (sdl2:gl-set-attr :alpha-size alpha-size)
-      (sdl2:gl-set-attr :depth-size depth-size)
-      (sdl2:gl-set-attr :stencil-size stencil-size)
-      (sdl2:gl-set-attr :red-size red-size)
-      (sdl2:gl-set-attr :green-size green-size)
-      (sdl2:gl-set-attr :blue-size blue-size)
-      (sdl2:gl-set-attr :buffer-size buffer-size)
-      (sdl2:gl-set-attr :doublebuffer (if double-buffer 1 0))
-      (let ((contex (sdl2:gl-create-context win)))
-        (sdl2:gl-make-current win contex)
-        (list contex win)))))
-|#
-
 (defmethod cepl.host:shutdown ()
   (let ((drm-gbm *drm-gbm*))
     (format t "Destroying backend~%")
@@ -174,7 +127,7 @@
     (when egl-display (egl:terminate egl-display))
     (when (gbm-device drm-gbm)
       (gbm:device-destroy (gbm-device drm-gbm)))
-    (when fd (sb-posix:close fd)))))
+    (when fd (nix:close fd)))))
 
 (defun drm-gbm-swap (drm-gbm)
   (egl:swap-buffers (egl-display drm-gbm) (egl-surface drm-gbm))
@@ -182,7 +135,6 @@
 	 (handle (gbm:bo-get-handle new-bo))
 	 (pitch (gbm:bo-get-stride new-bo))
 	 (fd (fd drm-gbm)))
-    ;(format t "Swapping buffers")
     (with-foreign-objects ((fb :uint32) (connector-id :uint32))
       (setf (mem-aref connector-id :uint32) (connector-id drm-gbm))
       (drm:mode-add-framebuffer fd
