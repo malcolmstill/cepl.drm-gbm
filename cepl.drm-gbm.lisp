@@ -13,6 +13,7 @@
    (width :accessor width :initarg :width :initform nil)
    (height :accessor height :initarg :height :initform nil)
    (previous-fb :accessor previous-fb :initarg :previous-fb :initform nil)
+   (page-flip-scheduled? :accessor page-flip-scheduled? :initarg :page-flip-scheduled? :initform nil)
    ;; GBM
    (gbm-device :accessor gbm-device :initarg :gbm-device :initform nil)
    (gbm-surface :accessor gbm-surface :initarg :gbm-surface :initform nil)
@@ -130,7 +131,14 @@
     (when fd (nix:close fd)))))
 
 (defun drm-gbm-swap (drm-gbm)
-  (egl:swap-buffers (egl-display drm-gbm) (egl-surface drm-gbm))
+
+  (when (not (page-flip-scheduled? drm-gbm))
+    (egl:swap-buffers (egl-display drm-gbm) (egl-surface drm-gbm))
+    (page-flip drm-gbm))
+  ;;(set-mode drm-gbm)
+  )
+
+(defun set-mode (drm-gbm)
   (let* ((new-bo (gbm:surface-lock-front-buffer (gbm-surface drm-gbm)))
 	 (handle (gbm:bo-get-handle new-bo))
 	 (pitch (gbm:bo-get-stride new-bo))
@@ -142,6 +150,24 @@
 				24 32 pitch handle fb)
       (drm:mode-set-crtc fd (foreign-slot-value (crtc drm-gbm) '(:struct drm:mode-crtc) 'drm:crtc-id) (mem-aref fb :uint32) 0 0 connector-id
 			 1 (mode-info drm-gbm))
+      (when (previous-bo drm-gbm)
+	(drm:mode-remove-framebuffer fd (previous-fb drm-gbm))
+	(gbm:surface-release-buffer (gbm-surface drm-gbm) (previous-bo drm-gbm)))
+      (setf (previous-bo drm-gbm) new-bo)
+      (setf (previous-fb drm-gbm) (mem-aref fb :uint32)))))
+
+(defun page-flip (drm-gbm)
+  (let* ((new-bo (gbm:surface-lock-front-buffer (gbm-surface drm-gbm)))
+	 (handle (gbm:bo-get-handle new-bo))
+	 (pitch (gbm:bo-get-stride new-bo))
+	 (fd (fd drm-gbm)))
+    (with-foreign-objects ((fb :uint32) (connector-id :uint32))
+      (setf (mem-aref connector-id :uint32) (connector-id drm-gbm))
+      (drm:mode-add-framebuffer fd (width drm-gbm) (height drm-gbm) 24 32 pitch handle fb)
+      ;;(drm:mode-set-crtc fd (foreign-slot-value (crtc drm-gbm) '(:struct drm:mode-crtc) 'drm:crtc-id) (mem-aref fb :uint32) 0 0 connector-id 1 (mode-info drm-gbm))
+      (let ((crtc-id (foreign-slot-value (crtc drm-gbm) '(:struct drm:mode-crtc) 'drm:crtc-id)))
+	(drm:mode-page-flip fd crtc-id (mem-aref fb :uint32) 1 (null-pointer)))
+      (setf (page-flip-scheduled? drm-gbm) t)
       (when (previous-bo drm-gbm)
 	(drm:mode-remove-framebuffer fd (previous-fb drm-gbm))
 	(gbm:surface-release-buffer (gbm-surface drm-gbm) (previous-bo drm-gbm)))
