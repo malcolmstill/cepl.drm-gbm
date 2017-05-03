@@ -198,4 +198,4 @@
 
 (set-step-func #'collect-drm-gbm-events)
 (set-swap-func #'drm-gbm-swap)
-;;(set-window-size-func #'drm-gbm-win-size)
+(set-window-size-func #'drm-gbm-win-size)
