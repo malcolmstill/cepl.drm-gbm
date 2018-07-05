@@ -23,16 +23,16 @@
    (egl-surface :accessor egl-surface :initarg :egl-surface :initform nil)
    (egl-context :accessor egl-context :initarg :egl-context :initform nil)))
 
-(defmethod cepl.host:init (&optional (init-flags :everything))
+(defun drm-gbm-init ()
   (unless *initd*
     (setf *drm-gbm* (make-instance 'drm-gbm))
     (setf *initd* t)))
 
-(defmethod cepl.host:request-context
+(defun drm-gbm-make-surface
     (width height title fullscreen
      no-frame alpha-size depth-size stencil-size
      red-size green-size blue-size buffer-size
-     double-buffer hidden resizable gl-version)
+     double-buffer hidden resizable)
   "Initializes the backend and returns a list containing: (context window)"
   (let* ((fd (nix:open "/dev/dri/card0" nix:o-rdwr))
 	 (display-config (drm:find-display-configuration fd))
@@ -84,8 +84,19 @@
       (setf (gbm-surface *drm-gbm*) gbm-surface)
       (setf (display-config *drm-gbm*) display-config)
       (list egl-context *drm-gbm*))))
+;; The return value (list egl-context *drm-gbm*) is what
+;; the CEPL host api passes in as surface
 
-(defmethod cepl.host:shutdown ()
+(defun drm-gbm-destroy-surface (surface)
+  (format t "destroy-surface does nothing"))
+
+(defun drm-gbm-make-context
+    (surface version double-buffer
+     alpha-size depth-size stencil-size buffer-size
+     red-size green-size blue-size)
+  (format t "make-context does nothing"))
+
+(defun drm-gbm-shutdown ()
   (let ((drm-gbm *drm-gbm*))
     (format t "Destroying backend~%")
     (let ((fd (fd drm-gbm))
@@ -130,13 +141,15 @@
       (gbm:device-destroy (gbm-device drm-gbm)))
     (when fd (nix:close fd)))))
 
-(defun drm-gbm-swap (drm-gbm)
-
-  (when (not (page-flip-scheduled? drm-gbm))
-    (egl:swap-buffers (egl-display drm-gbm) (egl-surface drm-gbm))
-    (page-flip drm-gbm))
-  ;;(set-mode drm-gbm)
-  )
+;; In this case surface is a list of egl-context drm-gbm
+(defun drm-gbm-swap (surface)
+  (format t "DRM-GBM-SWAP: ~A~%" surface)
+  (let ((drm-gbm (second surface)))
+    (when (not (page-flip-scheduled? drm-gbm))
+      (egl:swap-buffers (egl-display drm-gbm) (egl-surface drm-gbm))
+      (page-flip drm-gbm))
+    ;;(set-mode drm-gbm)
+    ))
 
 (defun set-mode (drm-gbm)
   (let* ((new-bo (gbm:surface-lock-front-buffer (gbm-surface drm-gbm)))
@@ -196,6 +209,54 @@
 ;;----------------------------------------------------------------------
 ;; tell cepl what to use
 
-(set-step-func #'collect-drm-gbm-events)
-(set-swap-func #'drm-gbm-swap)
-;;(set-window-size-func #'drm-gbm-win-size)
+(defun make-shared-drm-gbm-context (current-gl-context surface version double-buffer
+                                    alpha-size depth-size stencil-size buffer-size
+                                    red-size green-size blue-size)
+  )
+
+
+(defclass drm-gbm-api (cepl.host:api-2)
+  (;;
+   (supports-multiple-contexts-p :initform nil)
+   ;;
+   (supports-multiple-surfaces-p :initform nil)
+   ;;
+   (init-function :initform #'drm-gbm-init)
+   ;;
+   (shutdown-function :initform #'drm-gbm-shutdown)
+   ;;
+   (make-surface-function :initform #'drm-gbm-make-surface)
+   ;;
+   (destroy-surface-function :initform #'drm-gbm-destroy-surface)
+   ;;
+   (make-context-function :initform #'drm-gbm-make-context)
+   ;;
+   (step-function :initform #'collect-drm-gbm-events)
+   ;;
+   (register-event-callback-function :initform (lambda (fn)
+						 ))
+   ;;
+   (swap-function :initform #'drm-gbm-swap)
+   ;;
+   (surface-size-function :initform (lambda (surface)
+				      (list (width *drm-gbm*)
+					    (height *drm-gbm*))))
+   ;;
+   (make-context-current-function :initform (lambda (gl-context surface)))
+   ;;
+   (set-surface-size-function :initform (lambda (surface width height)))
+   ;;
+   (surface-fullscreen-p-function :initform (lambda (surface) t))
+   ;;
+   (set-surface-fullscreen-function :initform (lambda (surface)))
+   ;;
+   (surface-title-function :initform (lambda (surface)
+				       "Linux DRM/KMS"))
+   ;;
+   (set-surface-title-function :initform (lambda (surface title)
+					   ))
+   ;;
+   (make-gl-context-shared-with-current-context-function
+    :initform #'make-shared-drm-gbm-context)))
+
+(register-host 'drm-gbm-api)
