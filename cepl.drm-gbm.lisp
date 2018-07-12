@@ -143,7 +143,6 @@
 
 ;; In this case surface is a list of egl-context drm-gbm
 (defun drm-gbm-swap (surface)
-  (format t "DRM-GBM-SWAP: ~A~%" surface)
   (let ((drm-gbm (second surface)))
     (when (not (page-flip-scheduled? drm-gbm))
       (egl:swap-buffers (egl-display drm-gbm) (egl-surface drm-gbm))
