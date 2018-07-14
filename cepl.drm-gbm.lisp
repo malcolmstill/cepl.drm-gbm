@@ -44,7 +44,6 @@
     (multiple-value-bind (major minor) (egl:initialize egl-display)
       (format t "EGL version: ~d.~d~%" major minor))
     (egl:bind-api :opengl-api)
-    (format t "OpenGL API bound~%")
     (let* ((egl-config (first (egl:choose-config egl-display 1
 						 :red-size 8
 						 :green-size 8
@@ -83,7 +82,7 @@
       (setf (gbm-device *drm-gbm*) gbm-device)
       (setf (gbm-surface *drm-gbm*) gbm-surface)
       (setf (display-config *drm-gbm*) display-config)
-      (list egl-context *drm-gbm*))))
+      *drm-gbm*)))
 ;; The return value (list egl-context *drm-gbm*) is what
 ;; the CEPL host api passes in as surface
 
@@ -129,8 +128,6 @@
       (drm:mode-remove-framebuffer fd (previous-fb drm-gbm))
       (gbm:surface-release-buffer gbm-surface previous-bo))
 
-    (format t "Frame buffer removed~%")
-    
     (when (egl-surface drm-gbm)
       (egl:destroy-surface egl-display (egl-surface drm-gbm)))
     (when gbm-surface (gbm:surface-destroy gbm-surface))
@@ -142,33 +139,25 @@
     (when fd (nix:close fd)))))
 
 ;; In this case surface is a list of egl-context drm-gbm
-(defun drm-gbm-swap (surface)
-  (let ((drm-gbm (second surface)))
-    (when (not (page-flip-scheduled? drm-gbm))
-      (egl:swap-buffers (egl-display drm-gbm) (egl-surface drm-gbm))
-      (page-flip drm-gbm))
-    ;;(set-mode drm-gbm)
-    ))
+(defun drm-gbm-swap (drm-gbm)
+  (when (not (page-flip-scheduled? drm-gbm))
+    (page-flip drm-gbm)))
 
-(defun set-mode (drm-gbm)
-  (let* ((new-bo (gbm:surface-lock-front-buffer (gbm-surface drm-gbm)))
-	 (handle (gbm:bo-get-handle new-bo))
-	 (pitch (gbm:bo-get-stride new-bo))
-	 (fd (fd drm-gbm)))
-    (with-foreign-objects ((fb :uint32) (connector-id :uint32))
-      (setf (mem-aref connector-id :uint32) (connector-id drm-gbm))
-      (drm:mode-add-framebuffer fd
-				(width drm-gbm) (height drm-gbm)
-				24 32 pitch handle fb)
-      (drm:mode-set-crtc fd (foreign-slot-value (crtc drm-gbm) '(:struct drm:mode-crtc) 'drm:crtc-id) (mem-aref fb :uint32) 0 0 connector-id
-			 1 (mode-info drm-gbm))
-      (when (previous-bo drm-gbm)
-	(drm:mode-remove-framebuffer fd (previous-fb drm-gbm))
-	(gbm:surface-release-buffer (gbm-surface drm-gbm) (previous-bo drm-gbm)))
-      (setf (previous-bo drm-gbm) new-bo)
-      (setf (previous-fb drm-gbm) (mem-aref fb :uint32)))))
+#|
+After a call to egl-swap-buffers, a call to gbm:surface-lock-front-buffer
+is made. This call gives us a buffer object for the frame we've just drawn.
 
+I'm not entirely sure what drm:mode-add-framebuffer actually does, but
+calling drm:mode-page-flip will flip the old front buffer with our new
+front buffer (within new-bo).
+
+drm:mode-page-flip queues up a page flip event. When the next vblank
+occurs the buffer into which we have just drawn the frame is set to
+be the front buffer and, if we're listening, we'll receive a page flip
+callback.
+|#
 (defun page-flip (drm-gbm)
+  (egl:swap-buffers (egl-display drm-gbm) (egl-surface drm-gbm))
   (let* ((new-bo (gbm:surface-lock-front-buffer (gbm-surface drm-gbm)))
 	 (handle (gbm:bo-get-handle new-bo))
 	 (pitch (gbm:bo-get-stride new-bo))
@@ -176,7 +165,6 @@
     (with-foreign-objects ((fb :uint32) (connector-id :uint32))
       (setf (mem-aref connector-id :uint32) (connector-id drm-gbm))
       (drm:mode-add-framebuffer fd (width drm-gbm) (height drm-gbm) 24 32 pitch handle fb)
-      ;;(drm:mode-set-crtc fd (foreign-slot-value (crtc drm-gbm) '(:struct drm:mode-crtc) 'drm:crtc-id) (mem-aref fb :uint32) 0 0 connector-id 1 (mode-info drm-gbm))
       (let ((crtc-id (foreign-slot-value (crtc drm-gbm) '(:struct drm:mode-crtc) 'drm:crtc-id)))
 	(drm:mode-page-flip fd crtc-id (mem-aref fb :uint32) 1 (null-pointer)))
       (setf (page-flip-scheduled? drm-gbm) t)
@@ -187,7 +175,6 @@
       (setf (previous-fb drm-gbm) (mem-aref fb :uint32)))))
 
 (defmethod set-primary-thread-and-run (func &rest args)
-  ;;(sdl2:make-this-thread-main (lambda () (apply func args)))
   )
 
 ;;----------------------------------------------------------------------
