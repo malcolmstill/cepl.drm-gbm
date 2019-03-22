@@ -21,7 +21,19 @@
    ;; EGL
    (egl-display :accessor egl-display :initarg :egl-display :initform nil)
    (egl-surface :accessor egl-surface :initarg :egl-surface :initform nil)
-   (egl-context :accessor egl-context :initarg :egl-context :initform nil)))
+   (egl-context :accessor egl-context :initarg :egl-context :initform nil)
+   (bind-wayland-display :accessor bind-wayland-display
+			 :initarg :bind-wayland-display
+			 :initform nil)
+   (query-wayland-buffer :accessor query-wayland-buffer
+			 :initarg :query-wayland-buffer
+			 :initform nil)))
+
+(defun get-egl-display ()
+  (egl-display *drm-gbm*))
+
+(defun get-egl-context ()
+  (egl-context *drm-gbm*))
 
 (defun drm-gbm-init ()
   (unless *initd*
